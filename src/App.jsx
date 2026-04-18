@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Activity, ShieldCheck, User, Stethoscope, Clock, Zap, ClipboardList, Play, Square, Info, X, AlertTriangle } from 'lucide-react';
+import { Activity, ShieldCheck, User, Stethoscope, Clock, Zap, ClipboardList, Play, Square, Info, X, AlertTriangle, ChevronDown, ChevronUp, History } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, limit } from "firebase/firestore";
@@ -83,6 +83,8 @@ export default function App() {
   const [assessments, setAssessments] = useState([]);
   const [aiStatus, setAiStatus] = useState('idle');
   const [pastAssessments, setPastAssessments] = useState([]);
+  const [showHistory, setShowHistory] = useState(true);
+  const [expandedIncidentId, setExpandedIncidentId] = useState(null);
 
   const advisoryEndRef = useRef(null);
   useEffect(() => {
@@ -90,16 +92,16 @@ export default function App() {
   }, [assessments]);
 
   useEffect(() => {
-    const q = query(collection(db, 'incidents'), orderBy('timestamp', 'desc'), limit(5));
+    const q = query(collection(db, 'incidents'), orderBy('timestamp', 'desc'), limit(10));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPastAssessments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
   }, []);
 
-  const saveAssessmentToCloud = async (text, score, v) => {
+  const saveAssessmentToCloud = async (text, score, v, recommendations = []) => {
     try {
-      await addDoc(collection(db, 'incidents'), { text, score, vitals: v, timestamp: new Date().toISOString() });
+      await addDoc(collection(db, 'incidents'), { text, score, vitals: v, recommendations, timestamp: new Date().toISOString() });
     } catch (e) {
       console.error('Firestore error:', e);
     }
@@ -161,7 +163,7 @@ RECOMMENDATIONS:
         score: riskScore,
         level: riskLevel,
       }]);
-      saveAssessmentToCloud(assessment, riskScore, currentVitals);
+      saveAssessmentToCloud(assessment, riskScore, currentVitals, recommendations);
       setAiStatus('idle');
     } catch (error) {
       console.error(error);
@@ -589,34 +591,153 @@ RECOMMENDATIONS:
               </div>
             )}
 
-            {/* Past Assessments (Firestore) */}
-            {pastAssessments.length > 0 && (
-              <div className="bg-white rounded-xl p-5 border border-gray-200">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center">
-                  <Clock className="w-3.5 h-3.5 mr-2" />Past Assessments
-                </h3>
-                <div className="space-y-2">
-                  {pastAssessments.map((a) => (
-                    <div key={a.id} className="flex items-start space-x-3 pb-2 border-b border-gray-50 last:border-0">
-                      <span className="shrink-0 text-xs text-gray-400 font-mono pt-0.5">
-                        {new Date(a.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span className={`shrink-0 text-xs font-bold px-1.5 py-0.5 rounded ${
-                        a.score >= 70 ? 'bg-red-50 text-[#dc2626]' :
-                        a.score >= 30 ? 'bg-amber-50 text-[#d97706]' :
-                        'bg-green-50 text-[#16a34a]'
-                      }`}>
-                        {a.score}
-                      </span>
-                      <span className="truncate text-xs text-gray-500">{a.text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
           </div>
         </div>
+
+        {/* ── INCIDENT HISTORY PANEL ── */}
+        <div className="mt-5">
+          <button
+            onClick={() => setShowHistory(h => !h)}
+            className="w-full flex items-center justify-between px-5 py-3.5 bg-[#0a1628] rounded-xl text-white hover:bg-[#1a2a48] transition-colors"
+          >
+            <div className="flex items-center space-x-2">
+              <History className="w-4 h-4 text-white/60" />
+              <span className="font-semibold text-sm tracking-wide">Incident History</span>
+              {pastAssessments.length > 0 && (
+                <span className="text-xs px-2 py-0.5 bg-white/10 text-white/50 rounded-full">
+                  {pastAssessments.length} record{pastAssessments.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {showHistory ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
+          </button>
+
+          {showHistory && (
+            <div className="mt-3">
+              {pastAssessments.length === 0 ? (
+                <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+                  <Clock className="w-8 h-8 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm text-gray-400">No incident records yet.</p>
+                  <p className="text-xs text-gray-300 mt-1">Assessments will appear here once saved to the cloud.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {pastAssessments.map((a) => {
+                    const level = a.score >= 70 ? 'Critical' : a.score >= 30 ? 'Moderate' : 'Low';
+                    const isExpanded = expandedIncidentId === a.id;
+                    const ts = new Date(a.timestamp);
+                    const dateStr = ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    const timeStr = ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const levelStyles = {
+                      Critical: { badge: 'bg-red-100 text-[#dc2626] border-red-200', border: 'border-l-[#dc2626]' },
+                      Moderate: { badge: 'bg-amber-100 text-[#d97706] border-amber-200', border: 'border-l-[#d97706]' },
+                      Low:      { badge: 'bg-green-100 text-[#16a34a] border-green-200', border: 'border-l-[#16a34a]' },
+                    }[level];
+
+                    return (
+                      <div key={a.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${levelStyles.border} overflow-hidden`}>
+                        {/* Summary row — always visible, click to expand */}
+                        <button
+                          onClick={() => setExpandedIncidentId(isExpanded ? null : a.id)}
+                          className="w-full text-left px-5 py-3.5 flex items-center gap-4 hover:bg-gray-50 transition-colors"
+                        >
+                          {/* Timestamp */}
+                          <div className="shrink-0 text-left">
+                            <p className="text-xs font-semibold text-gray-800">{dateStr}</p>
+                            <p className="text-xs text-gray-400 font-mono">{timeStr}</p>
+                          </div>
+
+                          {/* Risk badge */}
+                          <span className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border ${levelStyles.badge}`}>
+                            {level} · {a.score}
+                          </span>
+
+                          {/* Vitals chips */}
+                          {a.vitals && (
+                            <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">
+                                HR {a.vitals.heartRate} bpm
+                              </span>
+                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">
+                                BP {a.vitals.systolicBP} mmHg
+                              </span>
+                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">
+                                SpO₂ {a.vitals.spo2}%
+                              </span>
+                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">
+                                Trop {a.vitals.troponin?.toFixed(3)} ng/mL
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Preview text */}
+                          {!isExpanded && (
+                            <p className="hidden lg:block text-xs text-gray-400 truncate max-w-xs shrink-0">{a.text}</p>
+                          )}
+
+                          <ChevronDown className={`w-4 h-4 text-gray-300 shrink-0 ml-auto transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {/* Expanded detail */}
+                        {isExpanded && (
+                          <div className="px-5 pb-5 border-t border-gray-100 space-y-4 pt-4">
+                            {/* Assessment text */}
+                            <div>
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center">
+                                <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Gemini Clinical Assessment
+                              </p>
+                              <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-200">{a.text}</p>
+                            </div>
+
+                            {/* Vitals snapshot */}
+                            {a.vitals && (
+                              <div>
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
+                                  <Activity className="w-3.5 h-3.5 mr-1.5" />Vitals Snapshot
+                                </p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                  {[
+                                    { label: 'Heart Rate', value: `${a.vitals.heartRate} bpm`, alert: a.vitals.heartRate > 110 || a.vitals.heartRate < 50 },
+                                    { label: 'Systolic BP', value: `${a.vitals.systolicBP} mmHg`, alert: a.vitals.systolicBP > 160 || a.vitals.systolicBP < 90 },
+                                    { label: 'SpO₂', value: `${a.vitals.spo2}%`, alert: a.vitals.spo2 < 94 },
+                                    { label: 'Troponin T', value: `${a.vitals.troponin?.toFixed(3)} ng/mL`, alert: a.vitals.troponin > 0.04 },
+                                  ].map(({ label, value, alert }) => (
+                                    <div key={label} className={`rounded-lg p-2.5 border text-center ${alert ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+                                      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                                      <p className={`text-sm font-mono font-bold ${alert ? 'text-[#dc2626]' : 'text-gray-800'}`}>{value}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Recommendations */}
+                            {a.recommendations && a.recommendations.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
+                                  <ClipboardList className="w-3.5 h-3.5 mr-1.5" />Recommendations
+                                </p>
+                                <ol className="space-y-1.5">
+                                  {a.recommendations.map((rec, i) => (
+                                    <li key={i} className="flex items-start space-x-2.5">
+                                      <span className="shrink-0 w-5 h-5 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                                      <span className="text-sm text-gray-700 leading-relaxed">{rec}</span>
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
