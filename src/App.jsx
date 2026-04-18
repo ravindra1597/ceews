@@ -257,6 +257,9 @@ RECOMMENDATIONS:
   const riskConfig   = getRiskConfig(p.riskLevel);
   const latestAssessment = p.assessments[p.assessments.length - 1];
   const anyCritical  = Object.values(patients).some(pt => pt.riskLevel === 'Critical');
+  const criticalNames = Object.entries(patients)
+    .filter(([, pt]) => pt.riskLevel === 'Critical')
+    .map(([id]) => PATIENTS[id].name);
 
   return (
     <div className="min-h-screen bg-[#0a1628] font-sans">
@@ -315,37 +318,60 @@ RECOMMENDATIONS:
         </div>
       )}
 
+      {/* Critical Alert Strip — top of page, only when a patient is critical */}
+      {anyCritical && (
+        <div className="bg-[#dc2626] critical-badge-pulse px-4 py-2 flex items-center justify-center gap-2 text-white text-sm font-semibold">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            CRITICAL ALERT —{' '}
+            {criticalNames.join(' & ')}{' '}
+            {criticalNames.length === 1 ? 'requires' : 'require'} immediate attention
+          </span>
+        </div>
+      )}
+
       {/* Header */}
-      <header className="bg-[#0a1628] border-b border-white/10 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="bg-white/10 p-2 rounded-lg">
+      <header className="bg-[#0a1628] border-b border-white/10 px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+        {/* Wordmark */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="relative bg-white/10 p-2 rounded-lg">
             <Activity className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-tight">
-              CEEWS <span className="text-xs px-1.5 py-0.5 bg-white/10 text-white/50 rounded ml-1.5">v2.0</span>
-            </h1>
-            <p className="text-xs text-white/40">Cardiac Event Early Warning System</p>
+            <div className="flex items-baseline gap-2">
+              <h1 className="text-lg font-black text-white tracking-tight leading-none">CEEWS</h1>
+              <span className="text-[10px] px-1.5 py-0.5 bg-white/10 text-white/40 rounded font-medium">v2.0</span>
+            </div>
+            <p className="text-[11px] text-white/35 tracking-wide mt-0.5">Cardiac Event Early Warning System</p>
           </div>
         </div>
-        <div className="flex items-center space-x-3">
+
+        {/* Right controls */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Telemetry Live indicator */}
+          {isLive && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+              <span className="text-xs text-green-300 font-medium whitespace-nowrap">Telemetry Live</span>
+            </div>
+          )}
           <button
             onClick={() => setShowWelcome(true)}
-            className="flex items-center space-x-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 rounded-lg text-sm text-white/60 hover:text-white transition-all"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 rounded-lg text-sm text-white/60 hover:text-white transition-all"
           >
             <Info className="w-4 h-4" />
             <span className="hidden md:inline">About</span>
           </button>
           <button
             onClick={() => setIsLive(!isLive)}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border ${
+            className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-bold transition-all border ${
               isLive
                 ? 'bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25'
                 : 'bg-green-500/15 text-green-300 border-green-500/30 hover:bg-green-500/25'
             }`}
           >
             {isLive ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            <span>{isLive ? 'Stop Feed' : 'Live Feed'}</span>
+            <span className="hidden sm:inline">{isLive ? 'Stop Feed' : 'Live Feed'}</span>
           </button>
         </div>
       </header>
@@ -397,7 +423,7 @@ RECOMMENDATIONS:
       </div>
 
       {/* ── Main Dashboard (scoped to active patient) ── */}
-      <div className="p-4 md:p-6 lg:p-8">
+      <div className="p-4 md:p-5 lg:p-6 xl:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
           {/* Left Column: Vitals */}
@@ -482,10 +508,10 @@ RECOMMENDATIONS:
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">60-Min AI Risk Assessment</p>
                   <div
-                    className={`inline-flex items-center rounded-2xl px-7 py-3 mb-5 ${riskConfig.badgeBg} ${riskConfig.isPulsing ? 'critical-badge-pulse' : ''}`}
-                    style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1.05, color: 'white', letterSpacing: '-0.01em' }}
+                    className={`inline-flex items-center rounded-2xl px-5 lg:px-7 py-2.5 lg:py-3 mb-5 ${riskConfig.badgeBg} ${riskConfig.isPulsing ? 'critical-badge-pulse' : ''}`}
+                    style={{ fontSize: 'clamp(1.6rem, 3.5vw, 3rem)', fontWeight: 900, lineHeight: 1.05, color: 'white', letterSpacing: '-0.01em' }}
                   >
-                    {riskConfig.isPulsing && <AlertTriangle className="w-9 h-9 mr-3 shrink-0" style={{ color: 'white' }} />}
+                    {riskConfig.isPulsing && <AlertTriangle className="w-7 h-7 lg:w-9 lg:h-9 mr-2.5 shrink-0" style={{ color: 'white' }} />}
                     {riskConfig.label}
                   </div>
                   <p className="text-sm text-gray-500 mb-5 leading-relaxed">
@@ -814,6 +840,13 @@ RECOMMENDATIONS:
         </div>
 
       </div>
+
+      {/* Footer */}
+      <footer className="border-t border-white/10 px-6 py-4 flex items-center justify-center">
+        <p className="text-xs text-white/25 tracking-wide text-center">
+          CEEWS &nbsp;·&nbsp; Cardiac Event Early Warning System &nbsp;·&nbsp; Built at hackUMBC 2025
+        </p>
+      </footer>
     </div>
   );
 }
