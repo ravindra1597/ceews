@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Activity, ShieldCheck, User, Stethoscope, Clock, Zap, ClipboardList, Play, Square, Info, X, AlertTriangle, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { Activity, ShieldCheck, User, Stethoscope, Clock, Zap, ClipboardList, Play, Square, Info, X, AlertTriangle, ChevronDown, ChevronUp, History, Plus, UserMinus } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, limit, doc, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -18,27 +18,28 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
-// ── Patient registry ────────────────────────────────────────────────────────
-const PATIENTS = {
-  A: { id: 'A', label: 'Patient A', name: 'John D.',    fsCollection: 'incidents_A', baseHR: 75,  baseBP: 120 },
-  B: { id: 'B', label: 'Patient B', name: 'Maria S.',   fsCollection: 'incidents_B', baseHR: 72,  baseBP: 118 },
-  C: { id: 'C', label: 'Patient C', name: 'Robert K.',  fsCollection: 'incidents_C', baseHR: 80,  baseBP: 125 },
-};
+// ── Initial patient roster ───────────────────────────────────────────────────
+const INITIAL_PATIENTS = [
+  { id: 'A', label: 'Patient A', name: 'John D.',   fsCollection: 'incidents_A', baseHR: 75, baseBP: 120 },
+  { id: 'B', label: 'Patient B', name: 'Maria S.',  fsCollection: 'incidents_B', baseHR: 72, baseBP: 118 },
+  { id: 'C', label: 'Patient C', name: 'Robert K.', fsCollection: 'incidents_C', baseHR: 80, baseBP: 125 },
+];
 
-const initPatient = ({ baseHR, baseBP }) => ({
-  vitals:   { heartRate: baseHR, systolicBP: baseBP, spo2: 98, troponin: 0.01 },
-  history:  { heartRate: Array(20).fill(baseHR), systolicBP: Array(20).fill(baseBP), spo2: Array(20).fill(98) },
-  riskScore:    12,
-  riskLevel:    'Low',
-  riskBreakdown: { hr: 33, bp: 33, trop: 34 },
-  assessments:  [],
-  aiStatus:     'idle',
-  isAiThinking: false,
+const MAX_PATIENTS = 6;
+
+const initPatient = ({ baseHR = 75, baseBP = 120 } = {}) => ({
+  vitals:          { heartRate: baseHR, systolicBP: baseBP, spo2: 98, troponin: 0.01 },
+  history:         { heartRate: Array(20).fill(baseHR), systolicBP: Array(20).fill(baseBP), spo2: Array(20).fill(98) },
+  riskScore:       12,
+  riskLevel:       'Low',
+  riskBreakdown:   { hr: 33, bp: 33, trop: 34 },
+  assessments:     [],
+  aiStatus:        'idle',
+  isAiThinking:    false,
   stressTestActive: false,
   pastAssessments: [],
 });
 
-// Pure risk computation — extracted so the telemetry interval can use it
 const computeRisk = (v, prevHistory) => {
   const hrTrend = v.heartRate  - prevHistory.heartRate[prevHistory.heartRate.length - 1];
   const bpTrend = v.systolicBP - prevHistory.systolicBP[prevHistory.systolicBP.length - 1];
@@ -60,7 +61,7 @@ const computeRisk = (v, prevHistory) => {
   };
 };
 
-// ── Sub-components ──────────────────────────────────────────────────────────
+// ── Sub-components ───────────────────────────────────────────────────────────
 const Sparkline = ({ data, color, min, max }) => {
   const width = 100; const height = 28;
   if (data.length === 0) return null;
@@ -95,46 +96,73 @@ const getRiskConfig = (level) => {
   };
 };
 
-// ── Main component ──────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────────────────
 export default function App() {
-  const [showWelcome,      setShowWelcome]      = useState(true);
-  const [isLive,           setIsLive]           = useState(false);
-  const [activePatient,    setActivePatient]    = useState('A');
-  const [patients,         setPatients]         = useState(
-    Object.fromEntries(Object.entries(PATIENTS).map(([id, cfg]) => [id, initPatient(cfg)]))
-  );
-  const [showHistory,      setShowHistory]      = useState(true);
+  // ── Core UI state ──────────────────────────────────────────────────────────
+  const [showWelcome,        setShowWelcome]        = useState(true);
+  const [isLive,             setIsLive]             = useState(false);
+  const [activePatient,      setActivePatient]      = useState('A');
+  const [showHistory,        setShowHistory]        = useState(true);
   const [expandedIncidentId, setExpandedIncidentId] = useState(null);
-  const [editingNoteId,    setEditingNoteId]    = useState(null);
-  const [noteText,         setNoteText]         = useState('');
+  const [editingNoteId,      setEditingNoteId]      = useState(null);
+  const [noteText,           setNoteText]           = useState('');
 
-  const advisoryEndRef = useRef(null);
-  useEffect(() => {
-    advisoryEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [patients[activePatient].assessments]);
+  // ── Dynamic patient roster ─────────────────────────────────────────────────
+  const [patientList, setPatientList] = useState(INITIAL_PATIENTS);
+  const [patients,    setPatients]    = useState(
+    Object.fromEntries(INITIAL_PATIENTS.map(cfg => [cfg.id, initPatient(cfg)]))
+  );
 
-  // Three independent Firestore real-time listeners
-  useEffect(() => {
-    const unsubs = Object.entries(PATIENTS).map(([id, cfg]) => {
-      const q = query(collection(db, cfg.fsCollection), orderBy('timestamp', 'desc'), limit(10));
-      return onSnapshot(q, snapshot => {
-        setPatients(prev => ({
-          ...prev,
-          [id]: { ...prev[id], pastAssessments: snapshot.docs.map(d => ({ id: d.id, ...d.data() })) },
-        }));
-      });
+  // Ref so the telemetry interval always sees the latest roster without restarting
+  const patientListRef = useRef(patientList);
+  useEffect(() => { patientListRef.current = patientList; }, [patientList]);
+
+  // Derived map for O(1) config lookups by id
+  const patientMap = Object.fromEntries(patientList.map(cfg => [cfg.id, cfg]));
+
+  // ── Modal state ────────────────────────────────────────────────────────────
+  const [addModal,       setAddModal]       = useState(false);
+  const [newName,        setNewName]        = useState('');
+  const [newId,          setNewId]          = useState('');
+  const [idError,        setIdError]        = useState('');
+  const [dischargeModal, setDischargeModal] = useState(null); // patientId | null
+
+  // ── Firestore listener registry ────────────────────────────────────────────
+  const firestoreUnsubs = useRef({});
+
+  const subscribePatient = (id, fsCollection) => {
+    if (firestoreUnsubs.current[id]) return;
+    const q = query(collection(db, fsCollection), orderBy('timestamp', 'desc'), limit(10));
+    firestoreUnsubs.current[id] = onSnapshot(q, snapshot => {
+      setPatients(prev => ({
+        ...prev,
+        [id]: { ...prev[id], pastAssessments: snapshot.docs.map(d => ({ id: d.id, ...d.data() })) },
+      }));
     });
-    return () => unsubs.forEach(u => u());
-  }, []);
+  };
 
-  // Single interval — all three patients run simultaneously in background
+  const unsubscribePatient = (id) => {
+    firestoreUnsubs.current[id]?.();
+    delete firestoreUnsubs.current[id];
+  };
+
+  // Subscribe to all initial patients on mount; cleanup all on unmount
+  useEffect(() => {
+    INITIAL_PATIENTS.forEach(cfg => subscribePatient(cfg.id, cfg.fsCollection));
+    return () => Object.values(firestoreUnsubs.current).forEach(u => u());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Telemetry interval — all patients run simultaneously ───────────────────
   useEffect(() => {
     if (!isLive) return;
     const interval = setInterval(() => {
       setPatients(prev => {
         const next = {};
-        Object.keys(PATIENTS).forEach(id => {
-          const p = prev[id];
+        // Always carry over the full previous state first
+        Object.assign(next, prev);
+        patientListRef.current.forEach(cfg => {
+          const p = prev[cfg.id];
+          if (!p) return;
           let newHR   = p.vitals.heartRate  + (Math.random() * 4 - 2);
           let newBP   = p.vitals.systolicBP + (Math.random() * 6 - 3);
           let newSpo2 = Math.min(100, p.vitals.spo2 + (Math.random() * 2 - 1));
@@ -151,7 +179,7 @@ export default function App() {
             systolicBP: [...p.history.systolicBP.slice(1), nextVitals.systolicBP],
             spo2:       [...p.history.spo2.slice(1),       nextVitals.spo2],
           };
-          next[id] = { ...p, vitals: nextVitals, history: nextHistory, ...computeRisk(nextVitals, p.history) };
+          next[cfg.id] = { ...p, vitals: nextVitals, history: nextHistory, ...computeRisk(nextVitals, p.history) };
         });
         return next;
       });
@@ -159,7 +187,57 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLive]);
 
-  // ── Cloud helpers ─────────────────────────────────────────────────────────
+  // ── Patient management ─────────────────────────────────────────────────────
+  const addPatient = () => {
+    const sanitized = newId.trim().toUpperCase().replace(/\s+/g, '_');
+    if (!sanitized || !newName.trim()) return;
+    if (patientMap[sanitized]) { setIdError('ID already in use'); return; }
+    if (patientList.length >= MAX_PATIENTS) return;
+
+    const cfg = {
+      id:           sanitized,
+      label:        `Patient ${sanitized}`,
+      name:         newName.trim(),
+      fsCollection: `incidents_${sanitized}`,
+      baseHR:       75,
+      baseBP:       120,
+    };
+
+    // Sync ref immediately so the next interval tick picks up the new patient
+    patientListRef.current = [...patientListRef.current, cfg];
+    setPatientList(prev => [...prev, cfg]);
+    setPatients(prev => ({ ...prev, [sanitized]: initPatient(cfg) }));
+    subscribePatient(sanitized, cfg.fsCollection);
+    setActivePatient(sanitized);
+
+    setAddModal(false);
+    setNewName('');
+    setNewId('');
+    setIdError('');
+  };
+
+  const dischargePatient = (id) => {
+    const remaining = patientList.filter(cfg => cfg.id !== id);
+
+    // Sync ref immediately before the next interval tick
+    patientListRef.current = remaining;
+    unsubscribePatient(id);
+    setPatientList(remaining);
+    setPatients(prev => {
+      const { [id]: _dropped, ...rest } = prev;
+      return rest;
+    });
+
+    if (activePatient === id) {
+      setActivePatient(remaining[0]?.id ?? null);
+      setExpandedIncidentId(null);
+      setEditingNoteId(null);
+      setNoteText('');
+    }
+    setDischargeModal(null);
+  };
+
+  // ── Cloud helpers ──────────────────────────────────────────────────────────
   const saveAssessmentToCloud = async (fsCollection, text, score, v, recommendations = []) => {
     try {
       await addDoc(collection(db, fsCollection), { text, score, vitals: v, recommendations, timestamp: new Date().toISOString() });
@@ -174,7 +252,7 @@ export default function App() {
     } catch (e) { console.error('Note save error:', e); }
   };
 
-  // ── AI helpers ────────────────────────────────────────────────────────────
+  // ── AI helpers ─────────────────────────────────────────────────────────────
   const parseGeminiResponse = (text) => {
     const assessmentMatch      = text.match(/ASSESSMENT:\s*([\s\S]*?)(?:\n\s*RECOMMENDATIONS:|$)/i);
     const recommendationsMatch = text.match(/RECOMMENDATIONS:\s*([\s\S]*)/i);
@@ -231,7 +309,7 @@ RECOMMENDATIONS:
           aiStatus: 'idle',
         },
       }));
-      saveAssessmentToCloud(PATIENTS[patientId].fsCollection, assessment, currentRiskScore, currentVitals, recommendations);
+      saveAssessmentToCloud(patientMap[patientId]?.fsCollection, assessment, currentRiskScore, currentVitals, recommendations);
     } catch (error) {
       console.error(error);
       setPatients(prev => ({ ...prev, [patientId]: { ...prev[patientId], isAiThinking: false, aiStatus: 'error' } }));
@@ -252,19 +330,119 @@ RECOMMENDATIONS:
     }, 15000);
   };
 
-  // ── Derived values for the active patient ─────────────────────────────────
-  const p            = patients[activePatient];
-  const riskConfig   = getRiskConfig(p.riskLevel);
+  // ── Derived values for active patient ──────────────────────────────────────
+  const advisoryEndRef = useRef(null);
+  useEffect(() => {
+    advisoryEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [patients[activePatient]?.assessments]);
+
+  const p             = patients[activePatient] ?? initPatient();
+  const riskConfig    = getRiskConfig(p.riskLevel);
   const latestAssessment = p.assessments[p.assessments.length - 1];
-  const anyCritical  = Object.values(patients).some(pt => pt.riskLevel === 'Critical');
-  const criticalNames = Object.entries(patients)
-    .filter(([, pt]) => pt.riskLevel === 'Critical')
-    .map(([id]) => PATIENTS[id].name);
+  const anyCritical   = Object.values(patients).some(pt => pt.riskLevel === 'Critical');
+  const criticalNames = patientList
+    .filter(cfg => patients[cfg.id]?.riskLevel === 'Critical')
+    .map(cfg => cfg.name);
+  const wardFull = patientList.length >= MAX_PATIENTS;
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#0a1628] font-sans">
+    <div className="min-h-screen bg-[#0a1628] font-sans flex flex-col">
 
-      {/* Welcome Modal */}
+      {/* ── Add Patient Modal ── */}
+      {addModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-gray-900">Add Patient</h3>
+              <button onClick={() => { setAddModal(false); setIdError(''); setNewName(''); setNewId(''); }}
+                className="text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-gray-100 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Patient Name</label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addPatient()}
+                  placeholder="e.g. Jane D."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-[#0a1628] focus:ring-1 focus:ring-[#0a1628] placeholder-gray-300"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Patient ID</label>
+                <input
+                  type="text"
+                  value={newId}
+                  onChange={e => { setNewId(e.target.value); setIdError(''); }}
+                  onKeyDown={e => e.key === 'Enter' && addPatient()}
+                  placeholder="e.g. ER-004"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 placeholder-gray-300 ${
+                    idError ? 'border-red-300 focus:border-red-400 focus:ring-red-300' : 'border-gray-200 focus:border-[#0a1628] focus:ring-[#0a1628]'
+                  }`}
+                />
+                {idError && <p className="text-xs text-red-500 mt-1">{idError}</p>}
+                <p className="text-xs text-gray-400 mt-1">Used as the Firestore collection key. Spaces become underscores.</p>
+              </div>
+            </div>
+            <div className="flex gap-2.5 mt-5">
+              <button
+                onClick={() => { setAddModal(false); setIdError(''); setNewName(''); setNewId(''); }}
+                className="flex-1 py-2.5 text-sm text-gray-500 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={addPatient}
+                disabled={!newName.trim() || !newId.trim()}
+                className="flex-1 py-2.5 text-sm font-bold bg-[#0a1628] text-white rounded-xl hover:bg-[#1a2a48] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Add to Ward
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Discharge Confirmation Modal ── */}
+      {dischargeModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
+                <UserMinus className="w-5 h-5 text-[#dc2626]" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Discharge Patient</h3>
+                <p className="text-xs text-gray-400">This action stops monitoring</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 mb-5 bg-gray-50 rounded-xl p-3 border border-gray-200">
+              Remove <strong className="text-gray-900">{patientMap[dischargeModal]?.name}</strong> from active monitoring?
+              Incident history will be retained in Firestore.
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                onClick={() => setDischargeModal(null)}
+                className="flex-1 py-2.5 text-sm text-gray-500 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => dischargePatient(dischargeModal)}
+                className="flex-1 py-2.5 text-sm font-bold bg-[#dc2626] text-white rounded-xl hover:bg-red-700 transition-colors"
+              >
+                Discharge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Welcome Modal ── */}
       {showWelcome && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0a1628]/90 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-8 shadow-2xl">
@@ -318,7 +496,7 @@ RECOMMENDATIONS:
         </div>
       )}
 
-      {/* Critical Alert Strip — top of page, only when a patient is critical */}
+      {/* ── Critical Alert Strip ── */}
       {anyCritical && (
         <div className="bg-[#dc2626] critical-badge-pulse px-4 py-2 flex items-center justify-center gap-2 text-white text-sm font-semibold">
           <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -330,11 +508,10 @@ RECOMMENDATIONS:
         </div>
       )}
 
-      {/* Header */}
+      {/* ── Header ── */}
       <header className="bg-[#0a1628] border-b border-white/10 px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
-        {/* Wordmark */}
         <div className="flex items-center gap-3 shrink-0">
-          <div className="relative bg-white/10 p-2 rounded-lg">
+          <div className="bg-white/10 p-2 rounded-lg">
             <Activity className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -345,10 +522,7 @@ RECOMMENDATIONS:
             <p className="text-[11px] text-white/35 tracking-wide mt-0.5">Cardiac Event Early Warning System</p>
           </div>
         </div>
-
-        {/* Right controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Telemetry Live indicator */}
           {isLive && (
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
@@ -377,53 +551,80 @@ RECOMMENDATIONS:
       </header>
 
       {/* ── Alert Summary Bar ── */}
-      <div className={`px-6 py-2 flex items-center justify-center gap-2 flex-wrap transition-colors ${anyCritical ? 'bg-[#dc2626] critical-badge-pulse' : 'bg-[#0d1f3c]'}`}>
-        {Object.entries(PATIENTS).map(([id, cfg], i) => {
-          const pt = patients[id];
-          const levelLabel = pt.riskLevel === 'Low' ? 'STABLE' : pt.riskLevel.toUpperCase();
-          const scoreStyles = pt.riskLevel === 'Critical'
-            ? 'bg-white/20 text-white'
-            : pt.riskLevel === 'Moderate'
-            ? 'bg-amber-500/25 text-amber-200'
+      <div className={`px-4 py-2 flex items-center justify-center gap-2 flex-wrap transition-colors ${anyCritical ? 'bg-[#dc2626] critical-badge-pulse' : 'bg-[#0d1f3c]'}`}>
+        {patientList.map((cfg, i) => {
+          const pt = patients[cfg.id];
+          if (!pt) return null;
+          const levelLabel  = pt.riskLevel === 'Low' ? 'STABLE' : pt.riskLevel.toUpperCase();
+          const scoreStyles = pt.riskLevel === 'Critical' ? 'bg-white/20 text-white'
+            : pt.riskLevel === 'Moderate' ? 'bg-amber-500/25 text-amber-200'
             : 'bg-green-500/20 text-green-200';
           return (
-            <span key={id} className="flex items-center gap-2 text-sm">
+            <span key={cfg.id} className="flex items-center gap-2 text-sm">
               {i > 0 && <span className="text-white/20 select-none hidden sm:inline">|</span>}
               <span className={`font-medium ${anyCritical ? 'text-white/90' : 'text-white/70'}`}>{cfg.name}</span>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreStyles}`}>
-                {levelLabel} {pt.riskScore}
-              </span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreStyles}`}>{levelLabel} {pt.riskScore}</span>
             </span>
           );
         })}
       </div>
 
       {/* ── Patient Tab Bar ── */}
-      <div className="bg-[#0a1628] border-b border-white/10 px-4 flex">
-        {Object.entries(PATIENTS).map(([id, cfg]) => {
-          const pt       = patients[id];
-          const isActive = activePatient === id;
-          const dotColor = pt.riskLevel === 'Critical' ? 'bg-red-400' : pt.riskLevel === 'Moderate' ? 'bg-amber-400' : 'bg-green-400';
-          return (
+      <div className="bg-[#0a1628] border-b border-white/10 flex min-w-0">
+        {/* Scrollable tab list */}
+        <div className="flex overflow-x-auto scrollbar-hide flex-1 min-w-0">
+          {patientList.map(cfg => {
+            const pt       = patients[cfg.id];
+            const isActive = activePatient === cfg.id;
+            const dotColor = pt?.riskLevel === 'Critical' ? 'bg-red-400'
+              : pt?.riskLevel === 'Moderate' ? 'bg-amber-400'
+              : 'bg-green-400';
+            return (
+              <div
+                key={cfg.id}
+                className={`group relative flex items-center gap-2 px-4 py-3 border-b-2 transition-all cursor-pointer shrink-0 ${
+                  isActive
+                    ? 'border-white text-white'
+                    : 'border-transparent text-white/40 hover:text-white/70 hover:border-white/20'
+                }`}
+                onClick={() => { setActivePatient(cfg.id); setExpandedIncidentId(null); setEditingNoteId(null); setNoteText(''); }}
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor} ${pt?.riskLevel === 'Critical' ? 'animate-pulse' : ''}`} />
+                <span className="text-sm font-medium whitespace-nowrap">{cfg.label}</span>
+                <span className="hidden md:inline text-white/30 text-sm whitespace-nowrap">— {cfg.name}</span>
+                {/* Discharge × button */}
+                {patientList.length > 1 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setDischargeModal(cfg.id); }}
+                    className="ml-1 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-white/20 transition-all shrink-0"
+                    title={`Discharge ${cfg.name}`}
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Add Patient / Ward Full button — pinned right */}
+        <div className="shrink-0 flex items-center border-l border-white/10 px-3">
+          {wardFull ? (
+            <span className="text-xs text-white/25 font-medium px-3 py-2 whitespace-nowrap">Ward Full</span>
+          ) : (
             <button
-              key={id}
-              onClick={() => { setActivePatient(id); setExpandedIncidentId(null); setEditingNoteId(null); setNoteText(''); }}
-              className={`flex items-center gap-2.5 px-5 py-3 text-sm font-medium border-b-2 transition-all ${
-                isActive
-                  ? 'border-white text-white'
-                  : 'border-transparent text-white/40 hover:text-white/70 hover:border-white/20'
-              }`}
+              onClick={() => setAddModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white/50 hover:text-white hover:bg-white/10 transition-all whitespace-nowrap"
             >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor} ${pt.riskLevel === 'Critical' ? 'animate-pulse' : ''}`} />
-              <span>{cfg.label}</span>
-              <span className="hidden sm:inline text-white/40">— {cfg.name}</span>
+              <Plus className="w-3.5 h-3.5" />
+              Add Patient
             </button>
-          );
-        })}
+          )}
+        </div>
       </div>
 
-      {/* ── Main Dashboard (scoped to active patient) ── */}
-      <div className="p-4 md:p-5 lg:p-6 xl:p-8">
+      {/* ── Main Dashboard ── */}
+      <div className="flex-1 p-4 md:p-5 lg:p-6 xl:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
           {/* Left Column: Vitals */}
@@ -435,8 +636,10 @@ RECOMMENDATIONS:
                 <User className="w-5 h-5 text-white" />
               </div>
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">ICU Bed {activePatient === 'A' ? 4 : activePatient === 'B' ? 5 : 6}</p>
-                <p className="font-bold text-gray-900">{PATIENTS[activePatient].name}</p>
+                <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
+                  {patientMap[activePatient]?.label ?? 'Patient'}
+                </p>
+                <p className="font-bold text-gray-900">{patientMap[activePatient]?.name}</p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <div className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} />
                   <span className="text-xs text-gray-400">{isLive ? 'Live monitoring' : 'Feed paused'}</span>
@@ -521,9 +724,7 @@ RECOMMENDATIONS:
                     onClick={triggerStressTest}
                     disabled={p.stressTestActive}
                     className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${
-                      p.stressTestActive
-                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'bg-[#0a1628] text-white hover:bg-[#1a2a48]'
+                      p.stressTestActive ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#0a1628] text-white hover:bg-[#1a2a48]'
                     }`}
                   >
                     <Zap className={`w-4 h-4 ${p.stressTestActive ? '' : 'text-amber-400'}`} />
@@ -576,9 +777,7 @@ RECOMMENDATIONS:
                   <span className="text-xs px-2.5 py-1 bg-red-500/20 text-red-300 rounded-full">API Error</span>
                 ) : (
                   <span className="text-xs px-2.5 py-1 bg-white/10 text-white/50 rounded-full">
-                    {p.assessments.length > 0
-                      ? `${p.assessments.length} assessment${p.assessments.length > 1 ? 's' : ''}`
-                      : 'Awaiting analysis'}
+                    {p.assessments.length > 0 ? `${p.assessments.length} assessment${p.assessments.length > 1 ? 's' : ''}` : 'Awaiting analysis'}
                   </span>
                 )}
               </div>
@@ -594,16 +793,11 @@ RECOMMENDATIONS:
                     {p.assessments.map((a) => (
                       <div key={a.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                            Assessment — {a.time}
-                          </span>
+                          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Assessment — {a.time}</span>
                           <span className={`text-xs font-bold px-2 py-0.5 rounded ${
                             a.level === 'Critical' ? 'bg-red-50 text-[#dc2626]' :
-                            a.level === 'Moderate' ? 'bg-amber-50 text-[#d97706]' :
-                            'bg-green-50 text-[#16a34a]'
-                          }`}>
-                            Score {a.score}
-                          </span>
+                            a.level === 'Moderate' ? 'bg-amber-50 text-[#d97706]' : 'bg-green-50 text-[#16a34a]'
+                          }`}>Score {a.score}</span>
                         </div>
                         <p className="text-gray-700 text-sm leading-relaxed">{a.text}</p>
                       </div>
@@ -635,9 +829,7 @@ RECOMMENDATIONS:
                   <ol className="space-y-3">
                     {latestAssessment.recommendations.map((rec, i) => (
                       <li key={i} className="flex items-start space-x-3">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">
-                          {i + 1}
-                        </span>
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
                         <span className="text-gray-800 text-sm leading-relaxed">{rec}</span>
                       </li>
                     ))}
@@ -661,7 +853,7 @@ RECOMMENDATIONS:
             <div className="flex items-center space-x-2">
               <History className="w-4 h-4 text-white/60" />
               <span className="font-semibold text-sm tracking-wide">Incident History</span>
-              <span className="text-xs text-white/30">— {PATIENTS[activePatient].name}</span>
+              <span className="text-xs text-white/30">— {patientMap[activePatient]?.name}</span>
               {p.pastAssessments.length > 0 && (
                 <span className="text-xs px-2 py-0.5 bg-white/10 text-white/50 rounded-full">
                   {p.pastAssessments.length} record{p.pastAssessments.length !== 1 ? 's' : ''}
@@ -676,7 +868,7 @@ RECOMMENDATIONS:
               {p.pastAssessments.length === 0 ? (
                 <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
                   <Clock className="w-8 h-8 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">No incident records yet for {PATIENTS[activePatient].name}.</p>
+                  <p className="text-sm text-gray-400">No incident records yet for {patientMap[activePatient]?.name}.</p>
                   <p className="text-xs text-gray-300 mt-1">Assessments will appear here once saved to the cloud.</p>
                 </div>
               ) : (
@@ -695,7 +887,6 @@ RECOMMENDATIONS:
 
                     return (
                       <div key={a.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${levelStyles.border} overflow-hidden`}>
-                        {/* Summary row */}
                         <button
                           onClick={() => setExpandedIncidentId(isExpanded ? null : a.id)}
                           className="w-full text-left px-5 py-3.5 flex items-center gap-4 hover:bg-gray-50 transition-colors"
@@ -715,24 +906,18 @@ RECOMMENDATIONS:
                               <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">Trop {a.vitals.troponin?.toFixed(3)} ng/mL</span>
                             </div>
                           )}
-                          {!isExpanded && (
-                            <p className="hidden lg:block text-xs text-gray-400 truncate max-w-xs shrink-0">{a.text}</p>
-                          )}
+                          {!isExpanded && <p className="hidden lg:block text-xs text-gray-400 truncate max-w-xs shrink-0">{a.text}</p>}
                           <ChevronDown className={`w-4 h-4 text-gray-300 shrink-0 ml-auto transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                         </button>
 
-                        {/* Expanded detail */}
                         {isExpanded && (
                           <div className="px-5 pb-5 border-t border-gray-100 space-y-4 pt-4">
-                            {/* Assessment text */}
                             <div>
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center">
                                 <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Gemini Clinical Assessment
                               </p>
                               <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-200">{a.text}</p>
                             </div>
-
-                            {/* Vitals snapshot */}
                             {a.vitals && (
                               <div>
                                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
@@ -753,8 +938,6 @@ RECOMMENDATIONS:
                                 </div>
                               </div>
                             )}
-
-                            {/* Recommendations */}
                             {a.recommendations && a.recommendations.length > 0 && (
                               <div>
                                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
@@ -787,7 +970,7 @@ RECOMMENDATIONS:
                                   />
                                   <div className="flex items-center gap-2">
                                     <button
-                                      onClick={() => saveDoctorNote(PATIENTS[activePatient].fsCollection, a.id, noteText)}
+                                      onClick={() => saveDoctorNote(patientMap[activePatient]?.fsCollection, a.id, noteText)}
                                       disabled={!noteText.trim()}
                                       className="px-3 py-1.5 bg-[#0a1628] text-white text-xs font-semibold rounded-lg hover:bg-[#1a2a48] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                     >
@@ -827,7 +1010,6 @@ RECOMMENDATIONS:
                                 </button>
                               )}
                             </div>
-
                           </div>
                         )}
                       </div>
@@ -838,10 +1020,9 @@ RECOMMENDATIONS:
             </div>
           )}
         </div>
-
       </div>
 
-      {/* Footer */}
+      {/* ── Footer ── */}
       <footer className="border-t border-white/10 px-6 py-4 flex items-center justify-center">
         <p className="text-xs text-white/25 tracking-wide text-center">
           CEEWS &nbsp;·&nbsp; Cardiac Event Early Warning System &nbsp;·&nbsp; Built at hackUMBC 2025
