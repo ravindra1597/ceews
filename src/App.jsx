@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Activity, ShieldCheck, User, Stethoscope, Clock, Zap, ClipboardList, Play, Square, Info, X, AlertTriangle, ChevronDown, ChevronUp, History, Plus, UserMinus } from 'lucide-react';
+import { Activity, ShieldCheck, User, Stethoscope, Clock, Zap, ClipboardList, Play, Square, Info, X, AlertTriangle, ChevronDown, ChevronUp, History, Plus, UserMinus, Printer } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, limit, doc, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -152,6 +152,63 @@ const formatTimeSince = (isoString) => {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+};
+
+const exportClinicalSummary = (patientCfg, incident) => {
+  const level = incident.score >= 70 ? 'Critical' : incident.score >= 30 ? 'Moderate' : 'Low';
+  const ts = new Date(incident.timestamp);
+  const dateStr = ts.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const timeStr = ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const vitalsHtml = incident.vitals ? `
+    <table>
+      <tr><th>Heart Rate</th><td>${incident.vitals.heartRate} bpm</td></tr>
+      <tr><th>Systolic BP</th><td>${incident.vitals.systolicBP} mmHg</td></tr>
+      <tr><th>SpO₂</th><td>${incident.vitals.spo2}%</td></tr>
+      <tr><th>Troponin T</th><td>${incident.vitals.troponin?.toFixed(3)} ng/mL</td></tr>
+    </table>` : '';
+
+  const recsHtml = incident.recommendations?.length ? `
+    <h3>Recommendations</h3>
+    <ol>${incident.recommendations.map(r => `<li>${r}</li>`).join('')}</ol>` : '';
+
+  const noteHtml = incident.doctorNote ? `
+    <h3>Clinical Note</h3>
+    <p>${incident.doctorNote}</p>` : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Clinical Summary — ${patientCfg?.name ?? 'Patient'}</title>
+    <style>
+      body { font-family: Georgia, serif; max-width: 700px; margin: 40px auto; color: #111; }
+      h1 { font-size: 1.4rem; margin-bottom: 4px; }
+      h2 { font-size: 1rem; color: #555; font-weight: normal; margin-bottom: 24px; }
+      h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin: 20px 0 6px; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+      th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+      th { width: 140px; color: #555; font-weight: normal; }
+      p { font-size: 0.95rem; line-height: 1.6; }
+      ol { padding-left: 20px; font-size: 0.9rem; line-height: 1.8; }
+      .badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;
+        background: ${level === 'Critical' ? '#fee2e2' : level === 'Moderate' ? '#fef3c7' : '#dcfce7'};
+        color: ${level === 'Critical' ? '#dc2626' : level === 'Moderate' ? '#d97706' : '#16a34a'}; }
+      .disclaimer { margin-top: 32px; font-size: 0.75rem; color: #999; border-top: 1px solid #eee; padding-top: 12px; }
+      @media print { body { margin: 20px; } }
+    </style>
+  </head><body>
+    <h1>CEEWS Clinical Summary — ${patientCfg?.name ?? 'Unknown Patient'}</h1>
+    <h2>${dateStr} at ${timeStr}</h2>
+    <span class="badge">${level.toUpperCase()} · Risk Score ${incident.score}</span>
+    <h3>Vitals Snapshot</h3>${vitalsHtml}
+    <h3>Gemini Clinical Assessment</h3>
+    <p>${incident.text}</p>
+    ${recsHtml}${noteHtml}
+    <p class="disclaimer">AI-generated summary from CEEWS · Cardiac Event Early Warning System · hackUMBC 2025. Verify with clinical judgment before acting.</p>
+  </body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  win?.addEventListener('load', () => { win.print(); URL.revokeObjectURL(url); });
 };
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -1091,8 +1148,26 @@ RECOMMENDATIONS:
                             </button>
 
                             {isExpanded && (
-                              <div className="px-5 pb-5 border-t border-gray-100 space-y-4 pt-4">
-                                <div>
+                              <div className="px-5 pb-5 border-t border-gray-100 space-y-4 pt-4 relative">
+                                <div className="absolute top-4 right-5 hidden sm:block">
+                                  <button
+                                    onClick={() => exportClinicalSummary(patientMap[activePatient], a)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors text-xs font-semibold"
+                                  >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Export
+                                  </button>
+                                </div>
+                                <div className="sm:hidden">
+                                  <button
+                                    onClick={() => exportClinicalSummary(patientMap[activePatient], a)}
+                                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 rounded-lg transition-colors text-xs font-semibold"
+                                  >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Export Summary
+                                  </button>
+                                </div>
+                                <div className="sm:pr-24">
                                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center">
                                     <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Gemini Clinical Assessment
                                   </p>
@@ -1202,8 +1277,6 @@ RECOMMENDATIONS:
             </div>
           </>
         )}
-      </main>
-
       </main>
 
       {/* ── Footer ── */}

@@ -147,9 +147,16 @@ level      = score < 30 → 'Low' | score < 70 → 'Moderate' | else → 'Critic
 breakdown  = each weight as % of total
 ```
 
+### `computeTrendAlerts(history, vitals)` → `string[]`
+Pure function. Analyzes the last 10 ticks (15 seconds) of telemetry data. Returns an array of alert strings if it detects continuous, strictly monotonic worsening (e.g., HR continuously rising above 100, BP falling below 90, SpO₂ falling below 94, or any continuous rise in Troponin).
+
+### `formatTimeSince(isoString)` → `string`
+Helper used primarily in the Triage Queue. Returns a human-readable string (e.g., `"45s ago"`, `"5m ago"`) for the elapsed time since the timestamp.
+
 ### `Sparkline` (React component)
 SVG polyline rendering last 20 data points. Props: `data[]`, `color`, `min`, `max`.  
 Height is fixed at 28px. Used for HR, BP, SpO₂ trend lines on vital cards.
+Height is fixed at 28px. Used for HR, BP, and SpO₂ trend lines on vital cards.
 
 ### `getRiskConfig(level)` → style config object
 Maps `'Low' | 'Moderate' | 'Critical'` to a set of Tailwind class strings and a boolean `isPulsing` flag.
@@ -177,6 +184,7 @@ All state lives inside the single `App` component.
 | Variable | Type | Purpose |
 |---|---|---|
 | `showWelcome` | `boolean` | Controls welcome/onboarding modal visibility |
+| `viewMode` | `string` | Toggle between `'patient'` (detailed dashboard) and `'triage'` (ranked queue) views |
 | `isLive` | `boolean` | Master switch for telemetry simulation interval |
 | `activePatient` | `string` | ID of the currently viewed patient tab (`'A'`, `'B'`, etc.) |
 | `showHistory` | `boolean` | Collapse/expand state of the Incident History panel |
@@ -196,6 +204,7 @@ All state lives inside the single `App` component.
 {
   vitals:          { heartRate, systolicBP, spo2, troponin },
   history:         { heartRate: number[20], systolicBP: number[20], spo2: number[20] },
+  history:         { heartRate: number[20], systolicBP: number[20], spo2: number[20], troponin: number[20] },
   riskScore:       number,       // 0–99
   riskLevel:       string,       // 'Low' | 'Moderate' | 'Critical'
   riskBreakdown:   { hr, bp, trop },  // each as % of total risk weight
@@ -210,6 +219,7 @@ All state lives inside the single `App` component.
 **`Assessment` shape** (in-memory only, cleared on refresh):
 ```js
 { id: number, time: string, text: string, recommendations: string[], score: number, level: string }
+{ id: number, time: string, text: string, recommendations: string[], score: number, level: string, vitals: object }
 ```
 
 ### Modal State
