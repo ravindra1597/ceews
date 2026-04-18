@@ -40,7 +40,7 @@ CEEWS is a real-time agentic AI dashboard that:
 Click **"Trigger Crash Demo"** on the dashboard to simulate hemodynamic collapse and watch Gemini respond with a full clinical advisory in real time.
 ## Screenshots
 
-![CEEWS Dashboard](C:\Users\rnsed\OneDrive\Pictures\Screenshots\dashboard.png)
+![CEEWS Dashboard](dashboard.png)
 ---
 
 ## Key Features
