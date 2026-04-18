@@ -71,7 +71,7 @@ Patient telemetry is fully simulated: each patient runs an independent state mac
 
 ## Built By
 
-**Ravindranath** — MS Applied Data Science student at UMBC
+**Ravindranath** — MS Applied Data Science student at UMBC .
 Solo build · hackUMBC Mini Hackathon 2026
 
 ---
