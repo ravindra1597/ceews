@@ -18,9 +18,9 @@ export default function TriageQueue({ sortedPatients, patients, callGeminiAdviso
           const rank = index + 1;
           const level = pt.riskLevel;
           const levelStyles = {
-            Critical: { border: 'border-l-[#dc2626]', bg: 'bg-red-500/5' },
-            Moderate: { border: 'border-l-[#d97706]', bg: 'bg-amber-500/5' },
-            Low:      { border: 'border-l-gray-300',  bg: 'bg-white' },
+            Critical: { border: 'border-l-[#dc2626]', bg: 'bg-red-500/5',    nameColor: 'text-white' },
+            Moderate: { border: 'border-l-[#d97706]', bg: 'bg-amber-500/5',  nameColor: 'text-white' },
+            Low:      { border: 'border-l-gray-300',  bg: 'bg-white',         nameColor: 'text-gray-900' },
           }[level];
           const riskBadgeStyles = {
             Critical: 'bg-red-100 text-[#dc2626] border-red-200',
@@ -36,7 +36,7 @@ export default function TriageQueue({ sortedPatients, patients, callGeminiAdviso
                 <span className="text-lg font-bold text-gray-400 w-6 text-center">{rank}</span>
                 <div className="flex items-center gap-2">
                   <User className="w-4 h-4 text-gray-500" />
-                  <span className="font-bold text-white text-sm">{cfg.name}</span>
+                  <span className={`font-semibold text-sm ${levelStyles.nameColor}`}>{cfg.name}</span>
                 </div>
               </div>
               {/* Risk */}
