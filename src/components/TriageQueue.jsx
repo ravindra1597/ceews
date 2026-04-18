@@ -36,7 +36,7 @@ export default function TriageQueue({ sortedPatients, patients, callGeminiAdviso
                 <span className="text-lg font-bold text-gray-400 w-6 text-center">{rank}</span>
                 <div className="flex items-center gap-2">
                   <User className="w-4 h-4 text-gray-500" />
-                  <span className="font-bold text-gray-800">{cfg.name}</span>
+                  <span className="font-bold text-gray-900 text-sm">{cfg.name}</span>
                 </div>
               </div>
               {/* Risk */}
