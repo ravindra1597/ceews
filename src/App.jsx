@@ -139,10 +139,26 @@ const computeTrendAlerts = (history, vitals) => {
   return alerts;
 };
 
+const formatTimeSince = (isoString) => {
+  if (!isoString) return 'Never';
+  const now = new Date();
+  const past = new Date(isoString);
+  const seconds = Math.floor((now - past) / 1000);
+
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
+
 // ── Main component ───────────────────────────────────────────────────────────
 export default function App() {
   // ── Core UI state ──────────────────────────────────────────────────────────
   const [showWelcome,        setShowWelcome]        = useState(true);
+  const [viewMode,           setViewMode]           = useState('patient'); // 'patient' | 'triage'
   const [isLive,             setIsLive]             = useState(false);
   const [activePatient,      setActivePatient]      = useState('A');
   const [showHistory,        setShowHistory]        = useState(true);
@@ -380,6 +396,13 @@ RECOMMENDATIONS:
     advisoryEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [patients[activePatient]?.assessments]);
 
+  const sortedPatients = [...patientList].sort((a, b) => {
+    const pA = patients[a.id];
+    const pB = patients[b.id];
+    if (!pA || !pB) return 0;
+    return pB.riskScore - pA.riskScore;
+  });
+
   const p             = patients[activePatient] ?? initPatient();
   const riskConfig    = getRiskConfig(p.riskLevel);
   const trendAlerts   = computeTrendAlerts(p.history, p.vitals);
@@ -568,6 +591,21 @@ RECOMMENDATIONS:
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* View Mode Toggle */}
+          <div className="hidden md:flex items-center bg-white/10 p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode('patient')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === 'patient' ? 'bg-[#0a1628] text-white' : 'text-white/60 hover:text-white'}`}
+            >
+              Patient View
+            </button>
+            <button
+              onClick={() => setViewMode('triage')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === 'triage' ? 'bg-[#0a1628] text-white' : 'text-white/60 hover:text-white'}`}
+            >
+              Triage Queue
+            </button>
+          </div>
           {isLive && (
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
@@ -669,422 +707,504 @@ RECOMMENDATIONS:
       </div>
 
       {/* ── Main Dashboard ── */}
-      <div className="flex-1 p-4 md:p-5 lg:p-6 xl:p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-          {/* Left Column: Vitals */}
-          <div className="lg:col-span-4 space-y-4">
-
-            {/* Patient badge */}
-            <div className="bg-white rounded-xl p-4 border border-gray-200 flex items-center space-x-4">
-              <div className="bg-[#0a1628] w-11 h-11 rounded-full flex items-center justify-center shrink-0">
-                <User className="w-5 h-5 text-white" />
-              </div>
+      <main className="flex-1 p-4 md:p-5 lg:p-6 xl:p-8">
+        {viewMode === 'triage' ? (
+          <div className="max-w-7xl mx-auto w-full">
+            <div className="bg-[#0d1f3c] rounded-xl p-4 mb-4 flex items-center justify-between">
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
-                  {patientMap[activePatient]?.label ?? 'Patient'}
-                </p>
-                <p className="font-bold text-gray-900">{patientMap[activePatient]?.name}</p>
-                <div className="flex items-center space-x-1.5 mt-0.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} />
-                  <span className="text-xs text-gray-400">{isLive ? 'Live monitoring' : 'Feed paused'}</span>
-                </div>
+                <h2 className="text-lg font-bold text-white">Triage Queue</h2>
+                <p className="text-xs text-white/40">Patients ranked by real-time risk score</p>
               </div>
+              <p className="text-sm text-white/60 font-medium">{patientList.length} Patients Monitored — Updated Live</p>
             </div>
+            <div className="space-y-2">
+              {sortedPatients.map((cfg, index) => {
+                const pt = patients[cfg.id];
+                if (!pt) return null;
+                const rank = index + 1;
+                const level = pt.riskLevel;
+                const levelStyles = {
+                  Critical: { border: 'border-l-[#dc2626]', bg: 'bg-red-500/5' },
+                  Moderate: { border: 'border-l-[#d97706]', bg: 'bg-amber-500/5' },
+                  Low:      { border: 'border-l-gray-300', bg: 'bg-white' },
+                }[level];
+                const riskBadgeStyles = {
+                  Critical: 'bg-red-100 text-[#dc2626] border-red-200',
+                  Moderate: 'bg-amber-100 text-[#d97706] border-amber-200',
+                  Low:      'bg-green-100 text-[#16a34a] border-green-200',
+                }[level];
+                const lastAssessmentTime = formatTimeSince(pt.pastAssessments[0]?.timestamp);
 
-            {/* Heart Rate */}
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Heart Rate</span>
-                <span className={`text-3xl font-mono font-bold ${p.vitals.heartRate > 110 || p.vitals.heartRate < 50 ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
-                  {p.vitals.heartRate}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">bpm</span>
-                </span>
-              </div>
-              <Sparkline data={p.history.heartRate} color={p.vitals.heartRate > 110 || p.vitals.heartRate < 50 ? '#dc2626' : '#16a34a'} min={40} max={160} />
-            </div>
-
-            {/* Systolic BP */}
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Systolic BP</span>
-                <span className={`text-3xl font-mono font-bold ${p.vitals.systolicBP > 160 || p.vitals.systolicBP < 90 ? 'text-[#dc2626]' : 'text-gray-800'}`}>
-                  {p.vitals.systolicBP}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">mmHg</span>
-                </span>
-              </div>
-              <Sparkline data={p.history.systolicBP} color={p.vitals.systolicBP > 160 || p.vitals.systolicBP < 90 ? '#dc2626' : '#2563eb'} min={60} max={200} />
-            </div>
-
-            {/* SpO2 */}
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">SpO₂</span>
-                <span className={`text-3xl font-mono font-bold ${p.vitals.spo2 < 94 ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
-                  {p.vitals.spo2}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">%</span>
-                </span>
-              </div>
-              <Sparkline data={p.history.spo2} color={p.vitals.spo2 < 94 ? '#dc2626' : '#16a34a'} min={70} max={100} />
-            </div>
-
-            {/* Troponin T */}
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Troponin T</span>
-                <span className={`text-3xl font-mono font-bold ${p.vitals.troponin > 0.04 ? 'text-[#dc2626]' : 'text-[#d97706]'}`}>
-                  {p.vitals.troponin.toFixed(3)}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">ng/mL</span>
-                </span>
-              </div>
-              <div className="w-full bg-gray-100 rounded-full h-2">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${p.vitals.troponin > 0.04 ? 'bg-[#dc2626]' : 'bg-[#d97706]'}`}
-                  style={{ width: `${Math.min((p.vitals.troponin / 0.1) * 100, 100)}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-1.5">
-                <span className="text-xs text-gray-300">0.00</span>
-                <span className="text-xs text-gray-400">Normal &lt;0.04 ng/mL</span>
-                <span className="text-xs text-gray-300">0.10+</span>
-              </div>
-            </div>
-
-            {/* Trend Alerts */}
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Trend Alerts</h3>
-              {trendAlerts.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {trendAlerts.map((alertText, i) => (
-                    <span key={i} className="px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-200 rounded-full">
-                      {alertText}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <ShieldCheck className="w-4 h-4 text-green-500 shrink-0" />
-                  <p>All vitals trending stable.</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Column: Risk + AI */}
-          <div className="lg:col-span-8 space-y-5">
-
-            {/* Risk Status Card */}
-            <div className={`rounded-2xl border-2 p-6 transition-all duration-500 ${riskConfig.cardBg} ${riskConfig.cardBorder} ${riskConfig.isPulsing ? 'critical-card-glow' : ''}`}>
-              <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">60-Min AI Risk Assessment</p>
-                  <div
-                    className={`inline-flex items-center rounded-2xl px-5 lg:px-7 py-2.5 lg:py-3 mb-5 ${riskConfig.badgeBg} ${riskConfig.isPulsing ? 'critical-badge-pulse' : ''}`}
-                    style={{ fontSize: 'clamp(1.6rem, 3.5vw, 3rem)', fontWeight: 900, lineHeight: 1.05, color: 'white', letterSpacing: '-0.01em' }}
-                  >
-                    {riskConfig.isPulsing && <AlertTriangle className="w-7 h-7 lg:w-9 lg:h-9 mr-2.5 shrink-0" style={{ color: 'white' }} />}
-                    {riskConfig.label}
-                  </div>
-                  <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-                    Gemini 2.5 Flash — continuous analysis of temporal vital dynamics and troponin biomarkers.
-                  </p>
-                  <button
-                    onClick={triggerStressTest}
-                    disabled={p.stressTestActive}
-                    className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${
-                      p.stressTestActive ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#0a1628] text-white hover:bg-[#1a2a48]'
-                    }`}
-                  >
-                    <Zap className={`w-4 h-4 ${p.stressTestActive ? '' : 'text-amber-400'}`} />
-                    <span>{p.stressTestActive ? 'Analysis Pipeline Active...' : 'Trigger Crash Demo'}</span>
-                  </button>
-                </div>
-                <div className={`flex-shrink-0 w-36 h-36 rounded-full border-4 ${riskConfig.ringColor} flex flex-col items-center justify-center bg-white shadow-md`}>
-                  <span className={`font-black font-mono leading-none ${riskConfig.scoreColor}`} style={{ fontSize: '3.5rem' }}>
-                    {p.riskScore}
-                  </span>
-                  <span className="text-xs text-gray-400 font-semibold mt-1 uppercase tracking-wider">Risk Score</span>
-                </div>
-              </div>
-            </div>
-
-            {/* XAI Risk Factor Breakdown */}
-            <div className="bg-white rounded-xl p-5 border border-gray-200">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center">
-                <Zap className="w-3.5 h-3.5 mr-2 text-[#d97706]" />Risk Factor Analysis (XAI)
-              </h3>
-              <div className="space-y-3">
-                {[
-                  { label: 'Heart Rate',     value: p.riskBreakdown.hr,   color: 'bg-[#16a34a]' },
-                  { label: 'Blood Pressure', value: p.riskBreakdown.bp,   color: 'bg-[#2563eb]' },
-                  { label: 'Troponin T',     value: p.riskBreakdown.trop, color: 'bg-[#d97706]' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="flex items-center space-x-3">
-                    <span className="text-gray-500 text-xs w-28 shrink-0">{label}</span>
-                    <div className="flex-1 bg-gray-100 rounded-full h-2">
-                      <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${value}%` }} />
+                return (
+                  <div key={cfg.id} className={`grid grid-cols-1 md:grid-cols-12 items-center gap-x-4 gap-y-2 px-4 py-3 rounded-lg border border-gray-200/80 border-l-4 transition-colors ${levelStyles.border} ${levelStyles.bg}`}>
+                    {/* Rank & Name */}
+                    <div className="md:col-span-2 flex items-center gap-4">
+                      <span className="text-lg font-bold text-gray-400 w-6 text-center">{rank}</span>
+                      <div className="flex items-center gap-2">
+                        <User className="w-4 h-4 text-gray-500" />
+                        <span className="font-bold text-gray-800">{cfg.name}</span>
+                      </div>
                     </div>
-                    <span className="text-gray-600 text-xs font-mono w-8 text-right">{value}%</span>
+                    {/* Risk */}
+                    <div className="md:col-span-2 flex items-center gap-3">
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${riskBadgeStyles}`}>{level.toUpperCase()}</span>
+                      <span className="font-mono font-bold text-lg text-gray-700">{pt.riskScore}</span>
+                    </div>
+                    {/* Vitals */}
+                    <div className="md:col-span-4 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
+                      <div className={`flex items-center justify-between ${pt.vitals.heartRate > 110 || pt.vitals.heartRate < 50 ? 'text-red-600' : 'text-gray-600'}`}><span className="text-gray-400 font-sans mr-2">HR</span> <span className="font-semibold">{pt.vitals.heartRate}</span></div>
+                      <div className={`flex items-center justify-between ${pt.vitals.systolicBP > 160 || pt.vitals.systolicBP < 90 ? 'text-red-600' : 'text-gray-600'}`}><span className="text-gray-400 font-sans mr-2">BP</span> <span className="font-semibold">{pt.vitals.systolicBP}</span></div>
+                      <div className={`flex items-center justify-between ${pt.vitals.spo2 < 94 ? 'text-red-600' : 'text-gray-600'}`}><span className="text-gray-400 font-sans mr-2">SpO₂</span> <span className="font-semibold">{pt.vitals.spo2}%</span></div>
+                      <div className={`flex items-center justify-between ${pt.vitals.troponin > 0.04 ? 'text-red-600' : 'text-gray-600'}`}><span className="text-gray-400 font-sans mr-2">Trop</span> <span className="font-semibold">{pt.vitals.troponin.toFixed(3)}</span></div>
+                    </div>
+                    {/* Last Assessment */}
+                    <div className="md:col-span-2 flex items-center gap-2 text-xs text-gray-500">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>AI Note: {lastAssessmentTime}</span>
+                    </div>
+                    {/* Actions */}
+                    <div className="md:col-span-2 flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => callGeminiAgent(cfg.id, pt.vitals, pt.riskScore, pt.riskLevel)}
+                        disabled={pt.isAiThinking}
+                        className="px-3 py-2 text-xs font-semibold bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 disabled:opacity-50 disabled:cursor-wait flex items-center gap-1.5"
+                      >
+                        <Stethoscope className="w-3.5 h-3.5" />
+                        {pt.isAiThinking ? 'Working...' : 'Assess'}
+                      </button>
+                      <button
+                        onClick={() => { setViewMode('patient'); setActivePatient(cfg.id); }}
+                        className="px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                      >
+                        View
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-
-            {/* AI Clinical Advisory */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3.5 bg-[#0a1628] flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-white">
-                  <Stethoscope className="w-4 h-4" />
-                  <span className="font-semibold text-sm tracking-wide">AI Clinical Advisory</span>
-                </div>
-                {p.isAiThinking ? (
-                  <span className="text-xs px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-full animate-pulse flex items-center">
-                    <Activity className="w-3 h-3 mr-1.5" />Analyzing vitals...
-                  </span>
-                ) : p.aiStatus === 'error' ? (
-                  <span className="text-xs px-2.5 py-1 bg-red-500/20 text-red-300 rounded-full">API Error</span>
-                ) : (
-                  <span className="text-xs px-2.5 py-1 bg-white/10 text-white/50 rounded-full">
-                    {p.assessments.length > 0 ? `${p.assessments.length} assessment${p.assessments.length > 1 ? 's' : ''}` : 'Awaiting analysis'}
-                  </span>
-                )}
-              </div>
-              <div className="p-5">
-                {p.assessments.length === 0 && !p.isAiThinking ? (
-                  <div className="text-center py-10">
-                    <Stethoscope className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                    <p className="text-sm text-gray-400">No assessments yet.</p>
-                    <p className="text-xs text-gray-300 mt-1">Click "Trigger Crash Demo" to consult the AI.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {p.assessments.map((a) => (
-                      <div key={a.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Assessment — {a.time}</span>
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                            a.level === 'Critical' ? 'bg-red-50 text-[#dc2626]' :
-                            a.level === 'Moderate' ? 'bg-amber-50 text-[#d97706]' : 'bg-green-50 text-[#16a34a]'
-                          }`}>Score {a.score}</span>
-                        </div>
-                        <p className="text-gray-700 text-sm leading-relaxed">{a.text}</p>
-                      </div>
-                    ))}
-                    {p.isAiThinking && (
-                      <div className="bg-gray-50 rounded-lg p-4 border border-amber-200 space-y-2 animate-pulse">
-                        <div className="h-3 bg-gray-200 rounded w-1/3" />
-                        <div className="h-3 bg-gray-200 rounded w-full" />
-                        <div className="h-3 bg-gray-200 rounded w-5/6" />
-                      </div>
-                    )}
-                    <div ref={advisoryEndRef} />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Clinical Recommendations */}
-            {latestAssessment && latestAssessment.recommendations.length > 0 && (
-              <div className="bg-white rounded-xl border-2 border-[#0a1628] overflow-hidden">
-                <div className="px-5 py-3.5 bg-[#0a1628] flex items-center justify-between">
-                  <div className="flex items-center space-x-2 text-white">
-                    <ClipboardList className="w-4 h-4" />
-                    <span className="font-semibold text-sm tracking-wide">Clinical Recommendations</span>
-                  </div>
-                  <span className="text-xs text-white/40">Last assessment · {latestAssessment.time}</span>
-                </div>
-                <div className="p-5 bg-blue-50/40">
-                  <ol className="space-y-3">
-                    {latestAssessment.recommendations.map((rec, i) => (
-                      <li key={i} className="flex items-start space-x-3">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                        <span className="text-gray-800 text-sm leading-relaxed">{rec}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="text-xs text-gray-400 mt-4 pt-3 border-t border-blue-100">
-                    AI-generated recommendations — verify with clinical judgment before acting.
-                  </p>
-                </div>
-              </div>
-            )}
-
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
-        {/* ── Incident History Panel ── */}
-        <div className="mt-5">
-          <button
-            onClick={() => setShowHistory(h => !h)}
-            className="w-full flex items-center justify-between px-5 py-3.5 bg-[#0a1628] rounded-xl text-white hover:bg-[#1a2a48] transition-colors"
-          >
-            <div className="flex items-center space-x-2">
-              <History className="w-4 h-4 text-white/60" />
-              <span className="font-semibold text-sm tracking-wide">Incident History</span>
-              <span className="text-xs text-white/30">— {patientMap[activePatient]?.name}</span>
-              {p.pastAssessments.length > 0 && (
-                <span className="text-xs px-2 py-0.5 bg-white/10 text-white/50 rounded-full">
-                  {p.pastAssessments.length} record{p.pastAssessments.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-            {showHistory ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
-          </button>
+              {/* Left Column: Vitals */}
+              <div className="lg:col-span-4 space-y-4">
 
-          {showHistory && (
-            <div className="mt-3">
-              {p.pastAssessments.length === 0 ? (
-                <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
-                  <Clock className="w-8 h-8 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">No incident records yet for {patientMap[activePatient]?.name}.</p>
-                  <p className="text-xs text-gray-300 mt-1">Assessments will appear here once saved to the cloud.</p>
+                {/* Patient badge */}
+                <div className="bg-white rounded-xl p-4 border border-gray-200 flex items-center space-x-4">
+                  <div className="bg-[#0a1628] w-11 h-11 rounded-full flex items-center justify-center shrink-0">
+                    <User className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
+                      {patientMap[activePatient]?.label ?? 'Patient'}
+                    </p>
+                    <p className="font-bold text-gray-900">{patientMap[activePatient]?.name}</p>
+                    <div className="flex items-center space-x-1.5 mt-0.5">
+                      <div className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} />
+                      <span className="text-xs text-gray-400">{isLive ? 'Live monitoring' : 'Feed paused'}</span>
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {p.pastAssessments.map((a) => {
-                    const level = a.score >= 70 ? 'Critical' : a.score >= 30 ? 'Moderate' : 'Low';
-                    const isExpanded = expandedIncidentId === a.id;
-                    const ts      = new Date(a.timestamp);
-                    const dateStr = ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                    const timeStr = ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    const levelStyles = {
-                      Critical: { badge: 'bg-red-100 text-[#dc2626] border-red-200',   border: 'border-l-[#dc2626]' },
-                      Moderate: { badge: 'bg-amber-100 text-[#d97706] border-amber-200', border: 'border-l-[#d97706]' },
-                      Low:      { badge: 'bg-green-100 text-[#16a34a] border-green-200', border: 'border-l-[#16a34a]' },
-                    }[level];
 
-                    return (
-                      <div key={a.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${levelStyles.border} overflow-hidden`}>
-                        <button
-                          onClick={() => setExpandedIncidentId(isExpanded ? null : a.id)}
-                          className="w-full text-left px-5 py-3.5 flex items-center gap-4 hover:bg-gray-50 transition-colors"
-                        >
-                          <div className="shrink-0 text-left">
-                            <p className="text-xs font-semibold text-gray-800">{dateStr}</p>
-                            <p className="text-xs text-gray-400 font-mono">{timeStr}</p>
+                {/* Heart Rate */}
+                <div className="bg-white rounded-xl p-4 border border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Heart Rate</span>
+                    <span className={`text-3xl font-mono font-bold ${p.vitals.heartRate > 110 || p.vitals.heartRate < 50 ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
+                      {p.vitals.heartRate}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">bpm</span>
+                    </span>
+                  </div>
+                  <Sparkline data={p.history.heartRate} color={p.vitals.heartRate > 110 || p.vitals.heartRate < 50 ? '#dc2626' : '#16a34a'} min={40} max={160} />
+                </div>
+
+                {/* Systolic BP */}
+                <div className="bg-white rounded-xl p-4 border border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Systolic BP</span>
+                    <span className={`text-3xl font-mono font-bold ${p.vitals.systolicBP > 160 || p.vitals.systolicBP < 90 ? 'text-[#dc2626]' : 'text-gray-800'}`}>
+                      {p.vitals.systolicBP}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">mmHg</span>
+                    </span>
+                  </div>
+                  <Sparkline data={p.history.systolicBP} color={p.vitals.systolicBP > 160 || p.vitals.systolicBP < 90 ? '#dc2626' : '#2563eb'} min={60} max={200} />
+                </div>
+
+                {/* SpO2 */}
+                <div className="bg-white rounded-xl p-4 border border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">SpO₂</span>
+                    <span className={`text-3xl font-mono font-bold ${p.vitals.spo2 < 94 ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
+                      {p.vitals.spo2}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">%</span>
+                    </span>
+                  </div>
+                  <Sparkline data={p.history.spo2} color={p.vitals.spo2 < 94 ? '#dc2626' : '#16a34a'} min={70} max={100} />
+                </div>
+
+                {/* Troponin T */}
+                <div className="bg-white rounded-xl p-4 border border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Troponin T</span>
+                    <span className={`text-3xl font-mono font-bold ${p.vitals.troponin > 0.04 ? 'text-[#dc2626]' : 'text-[#d97706]'}`}>
+                      {p.vitals.troponin.toFixed(3)}<span className="text-sm font-sans text-gray-400 ml-1 font-normal">ng/mL</span>
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${p.vitals.troponin > 0.04 ? 'bg-[#dc2626]' : 'bg-[#d97706]'}`}
+                      style={{ width: `${Math.min((p.vitals.troponin / 0.1) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1.5">
+                    <span className="text-xs text-gray-300">0.00</span>
+                    <span className="text-xs text-gray-400">Normal &lt;0.04 ng/mL</span>
+                    <span className="text-xs text-gray-300">0.10+</span>
+                  </div>
+                </div>
+
+                {/* Trend Alerts */}
+                <div className="bg-white rounded-xl p-4 border border-gray-200">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Trend Alerts</h3>
+                  {trendAlerts.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {trendAlerts.map((alertText, i) => (
+                        <span key={i} className="px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-200 rounded-full">
+                          {alertText}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <ShieldCheck className="w-4 h-4 text-green-500 shrink-0" />
+                      <p>All vitals trending stable.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Risk + AI */}
+              <div className="lg:col-span-8 space-y-5">
+
+                {/* Risk Status Card */}
+                <div className={`rounded-2xl border-2 p-6 transition-all duration-500 ${riskConfig.cardBg} ${riskConfig.cardBorder} ${riskConfig.isPulsing ? 'critical-card-glow' : ''}`}>
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">60-Min AI Risk Assessment</p>
+                      <div
+                        className={`inline-flex items-center rounded-2xl px-5 lg:px-7 py-2.5 lg:py-3 mb-5 ${riskConfig.badgeBg} ${riskConfig.isPulsing ? 'critical-badge-pulse' : ''}`}
+                        style={{ fontSize: 'clamp(1.6rem, 3.5vw, 3rem)', fontWeight: 900, lineHeight: 1.05, color: 'white', letterSpacing: '-0.01em' }}
+                      >
+                        {riskConfig.isPulsing && <AlertTriangle className="w-7 h-7 lg:w-9 lg:h-9 mr-2.5 shrink-0" style={{ color: 'white' }} />}
+                        {riskConfig.label}
+                      </div>
+                      <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+                        Gemini 2.5 Flash — continuous analysis of temporal vital dynamics and troponin biomarkers.
+                      </p>
+                      <button
+                        onClick={triggerStressTest}
+                        disabled={p.stressTestActive}
+                        className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold text-sm transition-all ${
+                          p.stressTestActive ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#0a1628] text-white hover:bg-[#1a2a48]'
+                        }`}
+                      >
+                        <Zap className={`w-4 h-4 ${p.stressTestActive ? '' : 'text-amber-400'}`} />
+                        <span>{p.stressTestActive ? 'Analysis Pipeline Active...' : 'Trigger Crash Demo'}</span>
+                      </button>
+                    </div>
+                    <div className={`flex-shrink-0 w-36 h-36 rounded-full border-4 ${riskConfig.ringColor} flex flex-col items-center justify-center bg-white shadow-md`}>
+                      <span className={`font-black font-mono leading-none ${riskConfig.scoreColor}`} style={{ fontSize: '3.5rem' }}>
+                        {p.riskScore}
+                      </span>
+                      <span className="text-xs text-gray-400 font-semibold mt-1 uppercase tracking-wider">Risk Score</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* XAI Risk Factor Breakdown */}
+                <div className="bg-white rounded-xl p-5 border border-gray-200">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center">
+                    <Zap className="w-3.5 h-3.5 mr-2 text-[#d97706]" />Risk Factor Analysis (XAI)
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: 'Heart Rate',     value: p.riskBreakdown.hr,   color: 'bg-[#16a34a]' },
+                      { label: 'Blood Pressure', value: p.riskBreakdown.bp,   color: 'bg-[#2563eb]' },
+                      { label: 'Troponin T',     value: p.riskBreakdown.trop, color: 'bg-[#d97706]' },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="flex items-center space-x-3">
+                        <span className="text-gray-500 text-xs w-28 shrink-0">{label}</span>
+                        <div className="flex-1 bg-gray-100 rounded-full h-2">
+                          <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${value}%` }} />
+                        </div>
+                        <span className="text-gray-600 text-xs font-mono w-8 text-right">{value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* AI Clinical Advisory */}
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3.5 bg-[#0a1628] flex items-center justify-between">
+                    <div className="flex items-center space-x-2 text-white">
+                      <Stethoscope className="w-4 h-4" />
+                      <span className="font-semibold text-sm tracking-wide">AI Clinical Advisory</span>
+                    </div>
+                    {p.isAiThinking ? (
+                      <span className="text-xs px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-full animate-pulse flex items-center">
+                        <Activity className="w-3 h-3 mr-1.5" />Analyzing vitals...
+                      </span>
+                    ) : p.aiStatus === 'error' ? (
+                      <span className="text-xs px-2.5 py-1 bg-red-500/20 text-red-300 rounded-full">API Error</span>
+                    ) : (
+                      <span className="text-xs px-2.5 py-1 bg-white/10 text-white/50 rounded-full">
+                        {p.assessments.length > 0 ? `${p.assessments.length} assessment${p.assessments.length > 1 ? 's' : ''}` : 'Awaiting analysis'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-5">
+                    {p.assessments.length === 0 && !p.isAiThinking ? (
+                      <div className="text-center py-10">
+                        <Stethoscope className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                        <p className="text-sm text-gray-400">No assessments yet.</p>
+                        <p className="text-xs text-gray-300 mt-1">Click "Trigger Crash Demo" to consult the AI.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {p.assessments.map((a) => (
+                          <div key={a.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Assessment — {a.time}</span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                a.level === 'Critical' ? 'bg-red-50 text-[#dc2626]' :
+                                a.level === 'Moderate' ? 'bg-amber-50 text-[#d97706]' : 'bg-green-50 text-[#16a34a]'
+                              }`}>Score {a.score}</span>
+                            </div>
+                            <p className="text-gray-700 text-sm leading-relaxed">{a.text}</p>
                           </div>
-                          <span className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border ${levelStyles.badge}`}>
-                            {level} · {a.score}
-                          </span>
-                          {a.vitals && (
-                            <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">HR {a.vitals.heartRate} bpm</span>
-                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">BP {a.vitals.systolicBP} mmHg</span>
-                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">SpO₂ {a.vitals.spo2}%</span>
-                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">Trop {a.vitals.troponin?.toFixed(3)} ng/mL</span>
-                            </div>
-                          )}
-                          {!isExpanded && <p className="hidden lg:block text-xs text-gray-400 truncate max-w-xs shrink-0">{a.text}</p>}
-                          <ChevronDown className={`w-4 h-4 text-gray-300 shrink-0 ml-auto transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {isExpanded && (
-                          <div className="px-5 pb-5 border-t border-gray-100 space-y-4 pt-4">
-                            <div>
-                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center">
-                                <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Gemini Clinical Assessment
-                              </p>
-                              <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-200">{a.text}</p>
-                            </div>
-                            {a.vitals && (
-                              <div>
-                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
-                                  <Activity className="w-3.5 h-3.5 mr-1.5" />Vitals Snapshot
-                                </p>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                  {[
-                                    { label: 'Heart Rate',  value: `${a.vitals.heartRate} bpm`,          alert: a.vitals.heartRate > 110 || a.vitals.heartRate < 50 },
-                                    { label: 'Systolic BP', value: `${a.vitals.systolicBP} mmHg`,         alert: a.vitals.systolicBP > 160 || a.vitals.systolicBP < 90 },
-                                    { label: 'SpO₂',        value: `${a.vitals.spo2}%`,                  alert: a.vitals.spo2 < 94 },
-                                    { label: 'Troponin T',  value: `${a.vitals.troponin?.toFixed(3)} ng/mL`, alert: a.vitals.troponin > 0.04 },
-                                  ].map(({ label, value, alert }) => (
-                                    <div key={label} className={`rounded-lg p-2.5 border text-center ${alert ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
-                                      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-                                      <p className={`text-sm font-mono font-bold ${alert ? 'text-[#dc2626]' : 'text-gray-800'}`}>{value}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            {a.recommendations && a.recommendations.length > 0 && (
-                              <div>
-                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
-                                  <ClipboardList className="w-3.5 h-3.5 mr-1.5" />Recommendations
-                                </p>
-                                <ol className="space-y-1.5">
-                                  {a.recommendations.map((rec, i) => (
-                                    <li key={i} className="flex items-start space-x-2.5">
-                                      <span className="shrink-0 w-5 h-5 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                                      <span className="text-sm text-gray-700 leading-relaxed">{rec}</span>
-                                    </li>
-                                  ))}
-                                </ol>
-                              </div>
-                            )}
-
-                            {/* Clinical Note */}
-                            <div className="border-t border-gray-100 pt-4">
-                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
-                                <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Clinical Note
-                              </p>
-                              {editingNoteId === a.id ? (
-                                <div className="space-y-2">
-                                  <textarea
-                                    rows={2}
-                                    value={noteText}
-                                    onChange={e => setNoteText(e.target.value)}
-                                    placeholder="Add clinical observation..."
-                                    className="w-full text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-[#0a1628] focus:ring-1 focus:ring-[#0a1628] placeholder-gray-300"
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => saveDoctorNote(patientMap[activePatient]?.fsCollection, a.id, noteText)}
-                                      disabled={!noteText.trim()}
-                                      className="px-3 py-1.5 bg-[#0a1628] text-white text-xs font-semibold rounded-lg hover:bg-[#1a2a48] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                      Save Note
-                                    </button>
-                                    <button
-                                      onClick={() => { setEditingNoteId(null); setNoteText(''); }}
-                                      className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : a.doctorNote ? (
-                                <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <p className="text-sm text-gray-800 leading-relaxed">{a.doctorNote}</p>
-                                    {a.noteTimestamp && (
-                                      <p className="text-xs text-gray-400 mt-1">
-                                        Saved {a.noteTimestamp.toDate?.().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—'}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <button
-                                    onClick={() => { setEditingNoteId(a.id); setNoteText(a.doctorNote); }}
-                                    className="shrink-0 text-xs text-[#0a1628] font-semibold hover:underline"
-                                  >
-                                    Edit
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => { setEditingNoteId(a.id); setNoteText(''); }}
-                                  className="w-full text-left px-3 py-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-400 hover:border-gray-300 hover:text-gray-500 transition-colors"
-                                >
-                                  + Add clinical observation...
-                                </button>
-                              )}
-                            </div>
+                        ))}
+                        {p.isAiThinking && (
+                          <div className="bg-gray-50 rounded-lg p-4 border border-amber-200 space-y-2 animate-pulse">
+                            <div className="h-3 bg-gray-200 rounded w-1/3" />
+                            <div className="h-3 bg-gray-200 rounded w-full" />
+                            <div className="h-3 bg-gray-200 rounded w-5/6" />
                           </div>
                         )}
+                        <div ref={advisoryEndRef} />
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
+                </div>
+
+                {/* Clinical Recommendations */}
+                {latestAssessment && latestAssessment.recommendations.length > 0 && (
+                  <div className="bg-white rounded-xl border-2 border-[#0a1628] overflow-hidden">
+                    <div className="px-5 py-3.5 bg-[#0a1628] flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-white">
+                        <ClipboardList className="w-4 h-4" />
+                        <span className="font-semibold text-sm tracking-wide">Clinical Recommendations</span>
+                      </div>
+                      <span className="text-xs text-white/40">Last assessment · {latestAssessment.time}</span>
+                    </div>
+                    <div className="p-5 bg-blue-50/40">
+                      <ol className="space-y-3">
+                        {latestAssessment.recommendations.map((rec, i) => (
+                          <li key={i} className="flex items-start space-x-3">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                            <span className="text-gray-800 text-sm leading-relaxed">{rec}</span>
+                          </li>
+                        ))}
+                      </ol>
+                      <p className="text-xs text-gray-400 mt-4 pt-3 border-t border-blue-100">
+                        AI-generated recommendations — verify with clinical judgment before acting.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+
+            {/* ── Incident History Panel ── */}
+            <div className="mt-5">
+              <button
+                onClick={() => setShowHistory(h => !h)}
+                className="w-full flex items-center justify-between px-5 py-3.5 bg-[#0a1628] rounded-xl text-white hover:bg-[#1a2a48] transition-colors"
+              >
+                <div className="flex items-center space-x-2">
+                  <History className="w-4 h-4 text-white/60" />
+                  <span className="font-semibold text-sm tracking-wide">Incident History</span>
+                  <span className="text-xs text-white/30">— {patientMap[activePatient]?.name}</span>
+                  {p.pastAssessments.length > 0 && (
+                    <span className="text-xs px-2 py-0.5 bg-white/10 text-white/50 rounded-full">
+                      {p.pastAssessments.length} record{p.pastAssessments.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                {showHistory ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
+              </button>
+
+              {showHistory && (
+                <div className="mt-3">
+                  {p.pastAssessments.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+                      <Clock className="w-8 h-8 mx-auto mb-3 text-gray-200" />
+                      <p className="text-sm text-gray-400">No incident records yet for {patientMap[activePatient]?.name}.</p>
+                      <p className="text-xs text-gray-300 mt-1">Assessments will appear here once saved to the cloud.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {p.pastAssessments.map((a) => {
+                        const level = a.score >= 70 ? 'Critical' : a.score >= 30 ? 'Moderate' : 'Low';
+                        const isExpanded = expandedIncidentId === a.id;
+                        const ts      = new Date(a.timestamp);
+                        const dateStr = ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        const timeStr = ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        const levelStyles = {
+                          Critical: { badge: 'bg-red-100 text-[#dc2626] border-red-200',   border: 'border-l-[#dc2626]' },
+                          Moderate: { badge: 'bg-amber-100 text-[#d97706] border-amber-200', border: 'border-l-[#d97706]' },
+                          Low:      { badge: 'bg-green-100 text-[#16a34a] border-green-200', border: 'border-l-[#16a34a]' },
+                        }[level];
+
+                        return (
+                          <div key={a.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${levelStyles.border} overflow-hidden`}>
+                            <button
+                              onClick={() => setExpandedIncidentId(isExpanded ? null : a.id)}
+                              className="w-full text-left px-5 py-3.5 flex items-center gap-4 hover:bg-gray-50 transition-colors"
+                            >
+                              <div className="shrink-0 text-left">
+                                <p className="text-xs font-semibold text-gray-800">{dateStr}</p>
+                                <p className="text-xs text-gray-400 font-mono">{timeStr}</p>
+                              </div>
+                              <span className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border ${levelStyles.badge}`}>
+                                {level} · {a.score}
+                              </span>
+                              {a.vitals && (
+                                <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                                  <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">HR {a.vitals.heartRate} bpm</span>
+                                  <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">BP {a.vitals.systolicBP} mmHg</span>
+                                  <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">SpO₂ {a.vitals.spo2}%</span>
+                                  <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">Trop {a.vitals.troponin?.toFixed(3)} ng/mL</span>
+                                </div>
+                              )}
+                              {!isExpanded && <p className="hidden lg:block text-xs text-gray-400 truncate max-w-xs shrink-0">{a.text}</p>}
+                              <ChevronDown className={`w-4 h-4 text-gray-300 shrink-0 ml-auto transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {isExpanded && (
+                              <div className="px-5 pb-5 border-t border-gray-100 space-y-4 pt-4">
+                                <div>
+                                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center">
+                                    <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Gemini Clinical Assessment
+                                  </p>
+                                  <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-200">{a.text}</p>
+                                </div>
+                                {a.vitals && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
+                                      <Activity className="w-3.5 h-3.5 mr-1.5" />Vitals Snapshot
+                                    </p>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                      {[
+                                        { label: 'Heart Rate',  value: `${a.vitals.heartRate} bpm`,          alert: a.vitals.heartRate > 110 || a.vitals.heartRate < 50 },
+                                        { label: 'Systolic BP', value: `${a.vitals.systolicBP} mmHg`,         alert: a.vitals.systolicBP > 160 || a.vitals.systolicBP < 90 },
+                                        { label: 'SpO₂',        value: `${a.vitals.spo2}%`,                  alert: a.vitals.spo2 < 94 },
+                                        { label: 'Troponin T',  value: `${a.vitals.troponin?.toFixed(3)} ng/mL`, alert: a.vitals.troponin > 0.04 },
+                                      ].map(({ label, value, alert }) => (
+                                        <div key={label} className={`rounded-lg p-2.5 border text-center ${alert ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+                                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                                          <p className={`text-sm font-mono font-bold ${alert ? 'text-[#dc2626]' : 'text-gray-800'}`}>{value}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {a.recommendations && a.recommendations.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
+                                      <ClipboardList className="w-3.5 h-3.5 mr-1.5" />Recommendations
+                                    </p>
+                                    <ol className="space-y-1.5">
+                                      {a.recommendations.map((rec, i) => (
+                                        <li key={i} className="flex items-start space-x-2.5">
+                                          <span className="shrink-0 w-5 h-5 rounded-full bg-[#0a1628] text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                                          <span className="text-sm text-gray-700 leading-relaxed">{rec}</span>
+                                        </li>
+                                      ))}
+                                    </ol>
+                                  </div>
+                                )}
+
+                                {/* Clinical Note */}
+                                <div className="border-t border-gray-100 pt-4">
+                                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
+                                    <Stethoscope className="w-3.5 h-3.5 mr-1.5" />Clinical Note
+                                  </p>
+                                  {editingNoteId === a.id ? (
+                                    <div className="space-y-2">
+                                      <textarea
+                                        rows={2}
+                                        value={noteText}
+                                        onChange={e => setNoteText(e.target.value)}
+                                        placeholder="Add clinical observation..."
+                                        className="w-full text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-[#0a1628] focus:ring-1 focus:ring-[#0a1628] placeholder-gray-300"
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => saveDoctorNote(patientMap[activePatient]?.fsCollection, a.id, noteText)}
+                                          disabled={!noteText.trim()}
+                                          className="px-3 py-1.5 bg-[#0a1628] text-white text-xs font-semibold rounded-lg hover:bg-[#1a2a48] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                          Save Note
+                                        </button>
+                                        <button
+                                          onClick={() => { setEditingNoteId(null); setNoteText(''); }}
+                                          className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : a.doctorNote ? (
+                                    <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="text-sm text-gray-800 leading-relaxed">{a.doctorNote}</p>
+                                        {a.noteTimestamp && (
+                                          <p className="text-xs text-gray-400 mt-1">
+                                            Saved {a.noteTimestamp.toDate?.().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—'}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => { setEditingNoteId(a.id); setNoteText(a.doctorNote); }}
+                                        className="shrink-0 text-xs text-[#0a1628] font-semibold hover:underline"
+                                      >
+                                        Edit
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => { setEditingNoteId(a.id); setNoteText(''); }}
+                                      className="w-full text-left px-3 py-2 border border-dashed border-gray-200 rounded-lg text-xs text-gray-400 hover:border-gray-300 hover:text-gray-500 transition-colors"
+                                    >
+                                      + Add clinical observation...
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
-      </div>
+          </>
+        )}
+      </main>
+
+      </main>
 
       {/* ── Footer ── */}
       <footer className="border-t border-white/10 px-6 py-4 flex items-center justify-center">
