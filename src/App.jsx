@@ -29,7 +29,7 @@ const MAX_PATIENTS = 6;
 
 const initPatient = ({ baseHR = 75, baseBP = 120 } = {}) => ({
   vitals:          { heartRate: baseHR, systolicBP: baseBP, spo2: 98, troponin: 0.01 },
-  history:         { heartRate: Array(20).fill(baseHR), systolicBP: Array(20).fill(baseBP), spo2: Array(20).fill(98) },
+  history:         { heartRate: Array(20).fill(baseHR), systolicBP: Array(20).fill(baseBP), spo2: Array(20).fill(98), troponin: Array(20).fill(0.01) },
   riskScore:       12,
   riskLevel:       'Low',
   riskBreakdown:   { hr: 33, bp: 33, trop: 34 },
@@ -94,6 +94,49 @@ const getRiskConfig = (level) => {
     badgeBg: 'bg-[#dc2626]', scoreColor: 'text-[#dc2626]', ringColor: 'border-[#dc2626]',
     label: 'CRITICAL', isPulsing: true,
   };
+};
+
+const computeTrendAlerts = (history, vitals) => {
+  const alerts = [];
+  const historyLength = 10;
+
+  // Helper to check for a strictly monotonic trend over the last `historyLength` points.
+  const checkTrend = (arr, direction) => {
+    if (!arr || arr.length < historyLength) return false;
+    const recentHistory = arr.slice(-historyLength);
+
+    for (let i = 1; i < recentHistory.length; i++) {
+      if (direction === 'rising' && recentHistory[i] <= recentHistory[i - 1]) return false;
+      if (direction === 'falling' && recentHistory[i] >= recentHistory[i - 1]) return false;
+    }
+    // A flat line is not a trend, so the strict inequality in the loop is key.
+    // If the loop completes, it's a valid trend, but we must ensure there was any change at all.
+    return recentHistory[0] !== recentHistory[recentHistory.length - 1];
+  };
+
+  // HR Trend: continuously rising above 100
+  if (checkTrend(history.heartRate, 'rising') && vitals.heartRate > 100) {
+    alerts.push('↑ HR Sustained Rise');
+  }
+
+  // BP Trend: continuously rising above 140 or falling below 90
+  if (checkTrend(history.systolicBP, 'rising') && vitals.systolicBP > 140) {
+    alerts.push('↑ BP Sustained Rise');
+  } else if (checkTrend(history.systolicBP, 'falling') && vitals.systolicBP < 90) {
+    alerts.push('↓ BP Sustained Drop');
+  }
+
+  // SpO2 Trend: continuously falling below 94
+  if (checkTrend(history.spo2, 'falling') && vitals.spo2 < 94) {
+    alerts.push('↓ SpO2 Sustained Drop');
+  }
+
+  // Troponin Trend: any continuous rise
+  if (checkTrend(history.troponin, 'rising')) {
+    alerts.push('↑ Troponin Sustained Rise');
+  }
+
+  return alerts;
 };
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -178,6 +221,7 @@ export default function App() {
             heartRate:  [...p.history.heartRate.slice(1),  nextVitals.heartRate],
             systolicBP: [...p.history.systolicBP.slice(1), nextVitals.systolicBP],
             spo2:       [...p.history.spo2.slice(1),       nextVitals.spo2],
+            troponin:   [...p.history.troponin.slice(1),   nextVitals.troponin],
           };
           next[cfg.id] = { ...p, vitals: nextVitals, history: nextHistory, ...computeRisk(nextVitals, p.history) };
         });
@@ -338,6 +382,7 @@ RECOMMENDATIONS:
 
   const p             = patients[activePatient] ?? initPatient();
   const riskConfig    = getRiskConfig(p.riskLevel);
+  const trendAlerts   = computeTrendAlerts(p.history, p.vitals);
   const latestAssessment = p.assessments[p.assessments.length - 1];
   const anyCritical   = Object.values(patients).some(pt => pt.riskLevel === 'Critical');
   const criticalNames = patientList
@@ -699,6 +744,25 @@ RECOMMENDATIONS:
                 <span className="text-xs text-gray-400">Normal &lt;0.04 ng/mL</span>
                 <span className="text-xs text-gray-300">0.10+</span>
               </div>
+            </div>
+
+            {/* Trend Alerts */}
+            <div className="bg-white rounded-xl p-4 border border-gray-200">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Trend Alerts</h3>
+              {trendAlerts.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {trendAlerts.map((alertText, i) => (
+                    <span key={i} className="px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-200 rounded-full">
+                      {alertText}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <ShieldCheck className="w-4 h-4 text-green-500 shrink-0" />
+                  <p>All vitals trending stable.</p>
+                </div>
+              )}
             </div>
           </div>
 
