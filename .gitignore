@@ -17,6 +17,10 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Backend secrets and virtual environment
+backend/serviceAccountKey.json
+backend/.venv/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
